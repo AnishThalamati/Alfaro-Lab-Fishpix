@@ -1,0 +1,195 @@
+---
+title: "Data Wrangling"
+output: html_document
+date: "2023-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## Including Plots
+
+You can also embed plots, for example:
+
+##include Libaries
+```{r}
+library(tidyverse)
+library(phytools)
+library(geiger)
+library(dplyr)
+
+```
+
+##import datasets
+
+##import data tree 
+##change path to work with local machine
+```{r}
+treepath <- "~/ALFARO_LAB/Historical_Impact_Of_Fishing/datasets/actinopt_12k_treePL (1).tre.xz"
+tt <- read.tree(treepath)
+tt_tips <- tt$tip.label
+glimpse(tt)
+
+```
+
+##import csv record of fish
+##change path to work with local machine
+```{r}
+datapath <- "~/ALFARO_LAB/Historical_Impact_Of_Fishing/datasets/adriatic sea naturalist records - Sheet1.csv"
+dd <- read_csv(datapath)
+dd
+```
+
+##create new column to map the tips of the tree 
+```{r}
+dd %>%
+  mutate(new_names = Scientific_name) %>%
+  mutate(new_names=replace(new_names, new_names =="Diplecogaster_bimaculata_bimaculata", "Diplecogaster_bimaculata")) %>%
+  mutate(new_names=replace(new_names, new_names =="Gasterosteus_aculeatus_aculeatus", "Gasterosteus_aculeatus")) %>%
+  mutate(new_names=replace(new_names, new_names =="Helicolenus_dactylopterus_dactylopterus", "Helicolenus_dactylopterus")) %>%
+   mutate(new_names=replace(new_names, new_names =="Scomberesox_saurus_saurus", "Scomberesox_saurus")) %>%
+  mutate(new_names=replace(new_names, new_names =="Sprattus_sprattus_sprattus", "Sprattus_sprattus")) %>%
+  mutate(temp_names = new_names) %>%
+  separate_wider_delim(temp_names, "_", names = c("genus", "spp"), too_many="drop" )->dd
+
+```
+
+##Isolate names not matched to the tree and those that are present on the tree 
+```{r}
+unmatched_names <-dd$new_names[!(dd$new_names %in% tt_tips)]
+unmatched_names
+
+matched_names <- dd$new_names[(dd$new_names %in% tt_tips)]
+matched_names
+```
+##create a dataframe for unmatched_names 
+```{r}
+unmatched_names_df <- stringr::str_split_fixed(unmatched_names, "_", 2)
+unmatched_names_df <- as.data.frame(unmatched_names_df)
+colnames(unmatched_names_df) <- c("Genus", "Species")
+glimpse(unmatched_names_df)
+```
+##create a dataframe for tt_tips 
+```{r}
+tt_tips_df <- stringr::str_split_fixed(tt_tips, "_", 2)
+tt_tips_df <- as.data.frame(tt_tips_df)
+colnames(tt_tips_df) <- c("Genus", "Species")
+glimpse(tt_tips_df)
+```
+##seperate unmatched_names into genus_pres & genus_no_pres based on comparing with tree df
+
+```{r}
+genus_pres <- filter(unmatched_names_df, unmatched_names_df$Genus %in% tt_tips_df$Genus)
+glimpse(genus_pres)
+genus_no_pres <- filter(unmatched_names_df, !(unmatched_names_df$Genus %in% tt_tips_df$Genus))
+glimpse(genus_no_pres)
+```
+##remove genus_no_pres from dd
+```{r}
+dd <- filter(dd, !(dd$genus %in% genus_no_pres$Genus))
+glimpse(dd)
+```
+##split genus_pres into duplicate and non duplicate 
+```{r}
+temp_df <- filter(dd, dd$genus %in% genus_pres$Genus)
+glimpse(temp_df)
+genus_count <- table(temp_df$genus)
+
+genus_dup <- names(genus_count[genus_count > 1])
+glimpse(genus_dup)
+genus_once <- names(genus_count[genus_count == 1])
+glimpse(genus_once)
+
+genus_dup_df <- filter(genus_pres, genus_pres$Genus %in% genus_dup)
+genus_once_df <- filter(genus_pres, genus_pres$Genus %in% genus_once)
+glimpse(genus_once_df)
+glimpse(genus_dup_df)
+```
+##add column to genus_once -> new names and genus_dup -> new_names
+```{r}
+genus_once_df$new_names <- paste(genus_once_df$Genus, genus_once_df$Species, sep ="_")
+glimpse(genus_once_df)
+genus_dup_df$new_names <- paste(genus_dup_df$Genus, genus_dup_df$Species, sep = "_")
+```
+
+##replace dd values present in genus_once with values from the tree with same genus
+
+##create substitute df 
+```{r}
+genus_once_df
+sub_df <- filter(tt_tips_df, tt_tips_df$Genus %in% genus_once_df$Genus)
+sub_df$new_names <- paste(sub_df$Genus, sub_df$Species, sep = "_")
+sub_df <- filter(sub_df, !(sub_df$new_names %in% dd$new_names))
+sub_df <- sub_df[!duplicated(sub_df$Genus),]
+sub_df <- sub_df[order(sub_df$Genus),]
+sub_df
+genus_dup_df
+```
+
+##create replacement frame
+## need to match replacment using alphabetization
+```{r}
+
+replace_df <- cbind(sub_df$new_names, genus_once_df$new_names)
+replace_df <- as.data.frame(replace_df)
+col_names <- c("sub_names", "old_names")
+colnames(replace_df) <- col_names
+replace_df
+```
+##update dd using datapoints from replace dataframe 
+##fix bugs 
+                            sub_names                     old_names
+1                Carapus_boraborensis                  Carapus_acus
+2               Chromogobius_zebratus   Chromogobius_quadrivittatus
+3           Deltentosteus_collonianus Deltentosteus_quadrimaculatus
+4 Diplecogaster_bimaculata_bimaculata      Diplecogaster_bimaculata
+5                    Ophidion_robinsi             Ophidion_barbatum
+6             Ophisurus_macrorhynchos             Ophisurus_serpens
+7           Scomberesox_saurus_saurus            Scomberesox_saurus
+8                     Umbrina_ronchus               Umbrina_cirrosa
+9               Zeugopterus_punctatus            Zeugopterus_regius
+> dd <- data.frame(old_names = c("Carapus_acus", "Chromogobius_quadrivittatus", "Deltentosteus_quadrimaculatus"),
++                  new_names = c("Carapus_boraborensis", "Chromogobius_zebratus", "Deltentosteus_collonianus"))
+> 
+> tt_tips_2 <- c("Chromogobius_zebratus", "Deltentosteus_collonianus", "Ophidion_barbatum")
+> 
+> # Filter out new_names in dd that are in genus_dup_df$new_names
+> dd <- filter(dd, !(dd$new_names %in% genus_dup_df$new_names))
+> 
+> # Find unmatched names in dd$new_names not in tt_tips
+> unmatched_names <- dd$new_names[!(dd$new_names %in% tt_tips_2)]
+> 
+> genus_dup_df
+             Genus   Species                 new_names
+1      Arnoglossus  kessleri      Arnoglossus_kessleri
+2      Callionymus  pusillus      Callionymus_pusillus
+3      Callionymus     risso         Callionymus_risso
+4  Chelidonichthys lastoviza Chelidonichthys_lastoviza
+5  Chelidonichthys  lucernus  Chelidonichthys_lucernus
+6     Lepadogaster  candolii     Lepadogaster_candolii
+7             Liza    ramado               Liza_ramado
+8         Nerophis maculatus        Nerophis_maculatus
+9        Symphodus ocellatus       Symphodus_ocellatus
+10       Trachinus   araneus         Trachinus_araneus
+> dd <- filter(dd, !(dd$new_names %in% genus_dup_df$new_names))
+> unmatched_names <-dd$new_names[!(dd$new_names %in% tt_tips_2)]
+> unmatched_names
+[1] "Carapus_boraborensis"
+> 
+##testing function
+```{r}
+genus_dup_df
+dd <- filter(dd, !(dd$new_names %in% genus_dup_df$new_names))
+unmatched_names <-dd$new_names[!(dd$new_names %in% tt_tips)]
+unmatched_names
+
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
